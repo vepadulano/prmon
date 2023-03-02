@@ -7,11 +7,13 @@
 #include <sys/stat.h>
 
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <deque>
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 
 #include "Imonitor.h"
 #include "registry.h"
@@ -68,7 +70,35 @@ std::vector<pid_t> pstree_pids(const pid_t mother_pid) {
   return cpids;
 }
 
-std::vector<pid_t> offspring_pids(const pid_t mother_pid) {
+std::string _my_exec(const char *cmd)
+{
+  std::array<char, 128> buffer;
+  std::string result;
+  std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
+  if (!pipe) {
+    throw std::runtime_error("popen() failed!");
+  }
+  while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+    result += buffer.data();
+  }
+  return result;
+}
+
+std::vector<pid_t> offspring_pids(const pid_t mother_pid)
+{
+  std::vector<pid_t> pid_list{{mother_pid}};
+
+  // Build command string 'ps h --pid $mother_pid -o pid:1'
+  // The output is a list of children PIDs, separated by newline
+  std::string cmd{"ps h --ppid "};
+  cmd += std::to_string(mother_pid) + " -o pid:1";
+  std::istringstream fs{_my_exec(cmd.c_str())};
+  std::copy(std::istream_iterator<pid_t>(fs), std::istream_iterator<pid_t>(), std::back_inserter(pid_list));
+
+  return pid_list;
+}
+
+std::vector<pid_t> _old_offspring_pids(const pid_t mother_pid) {
   // Get child process IDs in the new way, using /proc
   std::vector<pid_t> pid_list{};
   std::deque<pid_t> unprocessed_pids{};
